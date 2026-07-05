@@ -5,7 +5,7 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/smartpay
     username: postgres
-    password: 0911
+    password: ${DB_PASSWORD:your_password_here}
     driver-class-name: org.postgresql.Driver
 
   jpa:
