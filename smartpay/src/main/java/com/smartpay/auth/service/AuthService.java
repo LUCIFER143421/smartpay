@@ -7,6 +7,7 @@ import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.common.util.JwtUtil;
 import com.smartpay.user.UserEntity;
 import com.smartpay.user.UserRepository;
+import com.smartpay.wallet.WalletService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -20,6 +21,7 @@ public class AuthService {
     private final JwtUtil jwtUtil;
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
+    private final WalletService walletService;
 
     public AuthResponse register(RegisterRequest request){
         if(userRepository.existsByEmail(request.getEmail())){
@@ -37,7 +39,7 @@ public class AuthService {
                 .build();
         userRepository.save(user);
 
-        // Step 3: TODO — create wallet + seed signup bonus (Phase 4)
+        walletService.createWallet(user.getId(), "INR");
 
         String token= jwtUtil.generateToken(user.getEmail(), user.getRole());
 

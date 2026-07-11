@@ -47,6 +47,12 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
     }
 
+    @ExceptionHandler(ForbiddenException.class)
+    public ResponseEntity<ApiResponse<?>> forbiddenException(ForbiddenException ex){
+        ApiResponse<?> response=ApiResponse.error(ex.getMessage());
+        return new ResponseEntity<>(response,HttpStatus.FORBIDDEN);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<?>> handleGenericException(Exception ex) {
         ApiResponse<?> response = ApiResponse.error(
