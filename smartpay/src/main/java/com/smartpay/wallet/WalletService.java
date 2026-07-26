@@ -53,4 +53,26 @@ public class WalletService {
         walletRepository.save(wallet);
         return new WalletResponse(wallet.getId(),wallet.getBalance(),wallet.getCurrency(),wallet.getCreatedAt());
     }
+
+    public void debit(UUID walletId, BigDecimal amount){
+        WalletEntity wallet=walletRepository.findById(walletId)
+                .orElseThrow(
+                        ()-> new ResourceNotFoundException("wallet not found")
+                );
+        if (wallet.getBalance().compareTo(amount) < 0) {
+            // balance is LESS than amount → insufficient
+            throw new IllegalArgumentException("Insufficient balance");
+        }
+        wallet.setBalance(wallet.getBalance().subtract(amount));
+        walletRepository.save(wallet);
+    }
+
+    public void credit(UUID walletId, BigDecimal amount){
+        WalletEntity wallet=walletRepository.findById(walletId)
+                .orElseThrow(
+                        ()-> new ResourceNotFoundException("wallet not found")
+                );
+        wallet.setBalance(wallet.getBalance().add(amount));
+        walletRepository.save(wallet);
+    }
 }
