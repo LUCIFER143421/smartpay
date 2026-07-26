@@ -53,6 +53,12 @@ public class GlobalExceptionHandler {
         return new ResponseEntity<>(response,HttpStatus.FORBIDDEN);
     }
 
+    @ExceptionHandler(FraudDetectedException.class)
+    public ResponseEntity<ApiResponse<?>> handleFraudDetected(FraudDetectedException ex) {
+        ApiResponse<?> response = ApiResponse.error(ex.getMessage());
+        return new ResponseEntity<>(response, HttpStatus.FORBIDDEN);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<?>> handleGenericException(Exception ex) {
         ApiResponse<?> response = ApiResponse.error(

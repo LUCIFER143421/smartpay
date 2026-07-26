@@ -1,6 +1,7 @@
 package com.smartpay.payment;
 
 import com.smartpay.common.exception.ResourceNotFoundException;
+import com.smartpay.fraud.engine.FraudEngine;
 import com.smartpay.ledger.LedgerService;
 import com.smartpay.payment.dto.PaymentRequest;
 import com.smartpay.payment.dto.PaymentResponse;
@@ -25,6 +26,7 @@ public class PaymentService {
     private final LedgerService ledgerService;
     private final WalletRepository walletRepository;
     private final WalletService walletService;
+    private final FraudEngine fraudEngine;
 
     @Transactional
     public PaymentResponse processPayment(String idempotencyKey, String email, PaymentRequest paymentRequest) {
@@ -38,6 +40,7 @@ public class PaymentService {
                     result.get().getStatus(),
                     result.get().getCreatedAt());
         }
+        fraudEngine.evaluate(paymentRequest,email);
         UserEntity user=userRepository.findByEmail(email)
                 .orElseThrow(
                         ()-> new ResourceNotFoundException("User does't exist with email: "+ email)

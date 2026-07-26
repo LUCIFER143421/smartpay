@@ -22,6 +22,12 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      chat:
+        model: qwen2.5-coder:1.5b
+
 server:
   port: 8080
 
