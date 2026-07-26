@@ -3,6 +3,7 @@ package com.smartpay.payment;
 import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.fraud.engine.FraudEngine;
 import com.smartpay.ledger.LedgerService;
+import com.smartpay.notification.NotificationService;
 import com.smartpay.payment.dto.PaymentRequest;
 import com.smartpay.payment.dto.PaymentResponse;
 import com.smartpay.user.UserEntity;
@@ -27,6 +28,7 @@ public class PaymentService {
     private final WalletRepository walletRepository;
     private final WalletService walletService;
     private final FraudEngine fraudEngine;
+    private final NotificationService notificationService;
 
     @Transactional
     public PaymentResponse processPayment(String idempotencyKey, String email, PaymentRequest paymentRequest) {
@@ -64,6 +66,12 @@ public class PaymentService {
         );
         payment.setStatus("SUCCESS");
         paymentRepository.save(payment);
+
+        try {
+            notificationService.notifyPayment(payment);
+        } catch (Exception e) {
+            System.out.println("Notification failed: " + e.getMessage());
+        }
 
         return new PaymentResponse(payment.getSenderWalletId(),payment.getReceiverWalletId(),payment.getAmount(),
                 payment.getCurrency(),payment.getStatus(),payment.getCreatedAt());
