@@ -1,5 +1,6 @@
 package com.smartpay.auth.service;
 
+import com.smartpay.audit.AuditService;
 import com.smartpay.auth.dto.AuthResponse;
 import com.smartpay.auth.dto.LoginRequest;
 import com.smartpay.auth.dto.RegisterRequest;
@@ -22,6 +23,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final WalletService walletService;
+    private final AuditService auditService;
 
     public AuthResponse register(RegisterRequest request){
         if(userRepository.existsByEmail(request.getEmail())){
@@ -43,6 +45,16 @@ public class AuthService {
 
         String token= jwtUtil.generateToken(user.getEmail(), user.getRole());
 
+        auditService.log(
+                user.getId(),
+                "USER_REGISTERED",
+                "USER",
+                user.getId(),
+                null,
+                "ACTIVE",
+                null
+        );
+
         return new AuthResponse(token, user.getEmail(), user.getRole());
     }
 
@@ -60,6 +72,15 @@ public class AuthService {
                 ));
         // Step 3: Generate and return JWT
         String token= jwtUtil.generateToken(user.getEmail(), user.getRole());
+        auditService.log(
+                user.getId(),
+                "USER_LOGIN",
+                "USER",
+                user.getId(),
+                null,
+                null,
+                null
+        );
         return new AuthResponse(token, user.getEmail(), user.getRole());
     }
 }

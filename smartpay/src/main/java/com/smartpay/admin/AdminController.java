@@ -53,7 +53,7 @@ public class AdminController {
     public ResponseEntity<ApiResponse<UserResponse>> updateUserStatus(@RequestBody String status,
                                                                       @AuthenticationPrincipal UserDetails userDetails,
                                                                       @PathVariable UUID id){
-        UserResponse response=adminService.updateUserStatus(id,status);
+        UserResponse response=adminService.updateUserStatus(id,status,userDetails.getUsername());
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "Status updated", response

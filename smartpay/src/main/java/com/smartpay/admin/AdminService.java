@@ -1,5 +1,6 @@
 package com.smartpay.admin;
 
+import com.smartpay.audit.AuditService;
 import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.payment.PaymentEntity;
 import com.smartpay.payment.PaymentRepository;
@@ -19,6 +20,7 @@ import java.util.UUID;
 public class AdminService {
     private final UserRepository userRepository;
     private final PaymentRepository paymentRepository;
+    private final AuditService auditService;
 
     public List<UserResponse> getAllUsers(){
         List<UserEntity> users= userRepository.findAll();
@@ -35,18 +37,32 @@ public class AdminService {
                 ,user.getCreatedAt());
     }
 
-    public UserResponse updateUserStatus(UUID id,String status){
+    public UserResponse updateUserStatus(UUID id,String status, String adminEmail){
         Set<String> validStatuses = Set.of("FROZEN", "ACTIVE", "SUSPENDED");
 
         if (!validStatuses.contains(status)) {
             throw new IllegalArgumentException("Invalid status: " + status);
         }
 
+        UserEntity admin = userRepository.findByEmail(adminEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("Admin not found"));
+
         UserEntity user=userRepository.findById(id).orElseThrow(
                 ()-> new ResourceNotFoundException("User not found")
         );
+        String old=user.getStatus();
         user.setStatus(status);
         userRepository.save(user);
+
+        auditService.log(
+                admin.getId(),
+                "ACCOUNT_" + status,
+                "USER",
+                id,
+                old,
+                status,
+                null
+        );
         return new UserResponse(user.getId(),user.getEmail(),user.getFullName(),user.getRole(),user.getStatus()
                 ,user.getCreatedAt());
     }

@@ -1,5 +1,6 @@
 package com.smartpay.payment;
 
+import com.smartpay.audit.AuditService;
 import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.fraud.engine.FraudEngine;
 import com.smartpay.ledger.LedgerService;
@@ -29,6 +30,7 @@ public class PaymentService {
     private final WalletService walletService;
     private final FraudEngine fraudEngine;
     private final NotificationService notificationService;
+    private final AuditService auditService;
 
     @Transactional
     public PaymentResponse processPayment(String idempotencyKey, String email, PaymentRequest paymentRequest) {
@@ -67,6 +69,15 @@ public class PaymentService {
         payment.setStatus("SUCCESS");
         paymentRepository.save(payment);
 
+        auditService.log(
+                null,
+                "PAYMENT_SUCCESS",
+                "PAYMENT",
+                payment.getId(),
+                "PROCESSING",
+                "SUCCESS",
+                null
+        );
         try {
             notificationService.notifyPayment(payment);
         } catch (Exception e) {
