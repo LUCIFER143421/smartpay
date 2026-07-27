@@ -1,5 +1,6 @@
 package com.smartpay.admin;
 
+import com.smartpay.admin.dto.UpdateStatusRequest;
 import com.smartpay.audit.AuditService;
 import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.payment.PaymentEntity;
@@ -37,7 +38,7 @@ public class AdminService {
                 ,user.getCreatedAt());
     }
 
-    public UserResponse updateUserStatus(UUID id,String status, String adminEmail){
+    public UserResponse updateUserStatus(UUID id, String status, String adminEmail){
         Set<String> validStatuses = Set.of("FROZEN", "ACTIVE", "SUSPENDED");
 
         if (!validStatuses.contains(status)) {

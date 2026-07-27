@@ -15,4 +15,7 @@ public class PaymentRequest {
     private BigDecimal amount;
     @NotNull(message = "Wallet id can't be null")
     private UUID receiverWalletId;
+
+    @NotNull(message = "Sender wallet ID is required")
+    private UUID senderWalletId;
 }

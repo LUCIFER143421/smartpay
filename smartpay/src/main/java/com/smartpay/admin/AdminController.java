@@ -1,5 +1,6 @@
 package com.smartpay.admin;
 
+import com.smartpay.admin.dto.UpdateStatusRequest;
 import com.smartpay.common.response.ApiResponse;
 import com.smartpay.payment.dto.PaymentResponse;
 import com.smartpay.user.dto.UserResponse;
@@ -50,10 +51,10 @@ public class AdminController {
     }
 
     @PatchMapping("/users/{id}/status")
-    public ResponseEntity<ApiResponse<UserResponse>> updateUserStatus(@RequestBody String status,
+    public ResponseEntity<ApiResponse<UserResponse>> updateUserStatus(@RequestBody UpdateStatusRequest status,
                                                                       @AuthenticationPrincipal UserDetails userDetails,
                                                                       @PathVariable UUID id){
-        UserResponse response=adminService.updateUserStatus(id,status,userDetails.getUsername());
+        UserResponse response=adminService.updateUserStatus(id,status.getStatus(),userDetails.getUsername());
         return ResponseEntity.ok(
                 ApiResponse.success(
                         "Status updated", response

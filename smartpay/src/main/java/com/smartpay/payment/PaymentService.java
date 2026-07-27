@@ -1,6 +1,7 @@
 package com.smartpay.payment;
 
 import com.smartpay.audit.AuditService;
+import com.smartpay.common.exception.ForbiddenException;
 import com.smartpay.common.exception.ResourceNotFoundException;
 import com.smartpay.fraud.engine.FraudEngine;
 import com.smartpay.ledger.LedgerService;
@@ -50,8 +51,13 @@ public class PaymentService {
                         ()-> new ResourceNotFoundException("User does't exist with email: "+ email)
                 );
 
-        List<WalletEntity> wallets=walletRepository.findByUserId(user.getId());
-        WalletEntity wallet= wallets.get(0);
+        WalletEntity wallet = walletRepository.findById(paymentRequest.getSenderWalletId())
+                .orElseThrow(() -> new ResourceNotFoundException("Sender wallet not found"));
+
+// Verify ownership
+        if (!wallet.getUserId().equals(user.getId())) {
+            throw new ForbiddenException("This wallet does not belong to you");
+        }
         PaymentEntity payment=PaymentEntity.builder()
                 .senderWalletId(wallet.getId())
                 .receiverWalletId(paymentRequest.getReceiverWalletId())
@@ -97,17 +103,26 @@ public class PaymentService {
                 payment.getAmount(),payment.getCurrency(),payment.getStatus(),payment.getCreatedAt());
     }
 
-    public List<PaymentResponse> getMyPayments(String email){
-        UserEntity user=userRepository.findByEmail(email)
-                .orElseThrow(
-                        ()-> new ResourceNotFoundException("User does't exist with email: "+ email)
-                );
-        List<WalletEntity> wallets= walletRepository.findByUserId(user.getId());
-        WalletEntity wallet=wallets.get(0);
-        List<PaymentEntity> responses=paymentRepository.findBySenderWalletIdOrReceiverWalletId(wallet.getId(),wallet.getId());
+    public List<PaymentResponse> getMyPayments(String email) {
+        UserEntity user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        List<WalletEntity> wallets = walletRepository.findByUserId(user.getId());
+
+        List<UUID> walletIds = wallets.stream()
+                .map(WalletEntity::getId)
+                .toList();
+
+        List<PaymentEntity> responses = walletIds.stream()
+                .flatMap(walletId -> paymentRepository
+                        .findBySenderWalletIdOrReceiverWalletId(walletId, walletId)
+                        .stream())
+                .distinct()
+                .toList();
+
         return responses.stream()
-                .map(r-> new PaymentResponse(r.getSenderWalletId(),r.getReceiverWalletId(),r.getAmount()
-                ,r.getCurrency(),r.getStatus(),r.getCreatedAt()))
+                .map(r -> new PaymentResponse(r.getSenderWalletId(), r.getReceiverWalletId(),
+                        r.getAmount(), r.getCurrency(), r.getStatus(), r.getCreatedAt()))
                 .toList();
     }
 }
