@@ -3,19 +3,19 @@ spring:
     name: smartpay
 
   datasource:
-    url: jdbc:postgresql://localhost:5432/smartpay
-    username: postgres
-    password: 0911
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/smartpay}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:0911}
     driver-class-name: org.postgresql.Driver
 
   jpa:
     hibernate:
       ddl-auto: validate
-    show-sql: true
+    show-sql: false
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
-        format_sql: true
+        format_sql: false
 
   flyway:
     enabled: true
@@ -24,15 +24,15 @@ spring:
 
   ai:
     ollama:
-      base-url: http://localhost:11434
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       chat:
-        model: qwen2.5-coder:1.5b
+        model: ${OLLAMA_MODEL:qwen2.5-coder:1.5b}
 
 server:
-  port: 8080
+  port: ${PORT:8080}
 
 application:
   security:
     jwt:
-      secret-key: 404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970
-      expiration: 86400000
+      secret-key: ${JWT_SECRET:404E635266556A586E3272357538782F413F4428472B4B6250645367566B5970}
+      expiration: ${JWT_EXPIRATION:86400000}

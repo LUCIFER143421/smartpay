@@ -27,6 +27,9 @@ public class VelocityRule implements FraudRule {
                 ()-> new ResourceNotFoundException("user not found")
         );
         List<WalletEntity> wallets = walletRepository.findByUserId(user.getId());
+        if (wallets.isEmpty()) {
+            throw new ResourceNotFoundException("No wallet found for this user");
+        }
         WalletEntity wallet=wallets.get(0);
         LocalDateTime oneMinuteAgo = LocalDateTime.now().minusSeconds(60);
         if(paymentRepository.countBySenderWalletIdAndCreatedAtAfter(wallet.getId(), oneMinuteAgo)>=3){
