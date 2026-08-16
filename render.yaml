@@ -10,7 +10,7 @@ services:
       - key: DB_URL
         fromDatabase:
           name: smartpay-db
-          property: jdbcConnectionString
+          property: connectionString
       - key: DB_USERNAME
         fromDatabase:
           name: smartpay-db
@@ -23,6 +23,8 @@ services:
         generateValue: true
       - key: JWT_EXPIRATION
         value: "86400000"
+      - key: OLLAMA_BASE_URL
+        value: "http://localhost:11434"
 
 databases:
   - name: smartpay-db
