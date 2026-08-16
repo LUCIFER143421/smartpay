@@ -10,7 +10,7 @@ services:
       - key: DB_URL
         fromDatabase:
           name: smartpay-db
-          property: connectionString
+          property: jdbcConnectionString
       - key: DB_USERNAME
         fromDatabase:
           name: smartpay-db
