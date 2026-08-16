@@ -8,9 +8,19 @@ services:
     healthCheckPath: /actuator/health
     envVars:
       - key: DB_URL
+        value: jdbc:postgresql://$(RENDER_DB_HOST):$(RENDER_DB_PORT)/$(RENDER_DB_NAME)
+      - key: RENDER_DB_HOST
         fromDatabase:
           name: smartpay-db
-          property: jdbcConnectionString
+          property: host
+      - key: RENDER_DB_PORT
+        fromDatabase:
+          name: smartpay-db
+          property: port
+      - key: RENDER_DB_NAME
+        fromDatabase:
+          name: smartpay-db
+          property: database
       - key: DB_USERNAME
         fromDatabase:
           name: smartpay-db
