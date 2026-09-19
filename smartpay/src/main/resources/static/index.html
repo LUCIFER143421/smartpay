@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartPay — Money moves at your speed</title>
+    <meta name="description" content="Send, receive, and manage money instantly with SmartPay." />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+          theme: {
+            extend: {
+              colors: {
+                navy: {
+                  950: '#030712',
+                  900: '#0a0f1e',
+                  800: '#111827',
+                  700: '#1f2937',
+                  600: '#374151',
+                }
+              },
+              fontFamily: {
+                mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+              },
+              animation: {
+                'slide-in': 'slideIn 0.2s ease-out',
+                'fade-in': 'fadeIn 0.3s ease-out',
+                'pulse-slow': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+              },
+              keyframes: {
+                slideIn: {
+                  '0%': { transform: 'translateX(100%)', opacity: '0' },
+                  '100%': { transform: 'translateX(0)', opacity: '1' },
+                },
+                fadeIn: {
+                  '0%': { opacity: '0', transform: 'translateY(8px)' },
+                  '100%': { opacity: '1', transform: 'translateY(0)' },
+                },
+              },
+            }
+          }
+        }
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style>
+        * { font-family: 'Inter', sans-serif; }
+        body { background-color: #030712; }
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: #0a0f1e; }
+        ::-webkit-scrollbar-thumb { background: #1f2937; border-radius: 4px; }
+        select option { background: #111827; color: white; }
+        input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="module">
+    import { createElement, useState, useEffect, createContext, useContext } from 'https://esm.sh/react@18';
+    import { createRoot } from 'https://esm.sh/react-dom@18/client';
+
+    // ─── Auth Context ──────────────────────────────────────────────────────────
+    const AuthContext = createContext(null);
+    const useAuth = () => useContext(AuthContext);
+
+    function AuthProvider({ children }) {
+      const [user, setUser] = useState(() => {
+        try {
+          const s = localStorage.getItem('sp_user');
+          return s ? JSON.parse(s) : null;
+        } catch { return null; }
+      });
+
+      const login = (u) => { setUser(u); localStorage.setItem('sp_user', JSON.stringify(u)); };
+      const logout = () => { setUser(null); localStorage.removeItem('sp_user'); };
+
+      return createElement(AuthContext.Provider, { value: { user, login, logout } }, children);
+    }
+
+    // ─── API ───────────────────────────────────────────────────────────────────
+    const BASE = 'https://smartpay-api-1eh4.onrender.com';
+
+    // Called when token is expired/invalid — clears session and sends to login
+    function handleSessionExpired() {
+      localStorage.removeItem('sp_user');
+      window.location.reload(); // AuthProvider re-reads localStorage → user=null → shows landing
+    }
+
+    async function api(path, opts = {}, token = null) {
+      const headers = { 'Content-Type': 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+      if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey;
+
+      let res;
+      try {
+        res = await fetch(BASE + path, { ...opts, headers: { ...headers, ...(opts.headers || {}) } });
+      } catch (networkErr) {
+        // Network down or backend cold-starting
+        throw new Error('Cannot reach server. Please try again in a moment.');
+      }
+
+      // Token expired or invalid → logout and redirect
+      if (res.status === 401) {
+        handleSessionExpired();
+        return;
+      }
+
+      // Parse response safely — backend may return empty body on some errors
+      const text = await res.text();
+      const data = text ? JSON.parse(text) : {};
+
+      if (!res.ok || !data.success) {
+        throw new Error(data.message || `Error ${res.status}`);
+      }
+
+      return data.data;
+    }
+
+    // ─── Helpers ───────────────────────────────────────────────────────────────
+    const h = createElement;
+
+    const fmt = (amount, currency = 'INR') =>
+      new Intl.NumberFormat('en-IN', { style: 'currency', currency, minimumFractionDigits: 2 }).format(amount);
+
+    const fmtDate = (d) => {
+      if (!d) return 'N/A';
+      let value = String(d).trim();
+      if (/^\d{4}-\d{2}-\d{2}T/.test(value) && !/[zZ]|[+-]\d{2}:?\d{2}$/.test(value)) {
+        value = value.replace(/\.(\d{3})\d+/, '.$1') + 'Z';
+      }
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return 'N/A';
+      return date.toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:true});
+    };
+
+    const short = (id) => id ? `${id.slice(0,8)}…${id.slice(-4)}` : '';
+
+    const greeting = () => {
+      const hr = new Date().getHours();
+      return hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+    };
+
+    // ─── SVG Icons ─────────────────────────────────────────────────────────────
+    const Ico = {
+      home:    () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('path',{d:'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z'}),h('polyline',{points:'9 22 9 12 15 12 15 22'})),
+      wallet:  () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('rect',{x:2,y:5,width:20,height:14,rx:2}),h('path',{d:'M16 12h.01'})),
+      send:    () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('line',{x1:22,y1:2,x2:11,y2:13}),h('polygon',{points:'22 2 15 22 11 13 2 9 22 2'})),
+      history: () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('circle',{cx:12,cy:12,r:10}),h('polyline',{points:'12 6 12 12 16 14'})),
+      admin:   () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('path',{d:'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z'})),
+      logout:  () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('path',{d:'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4'}),h('polyline',{points:'16 17 21 12 16 7'}),h('line',{x1:21,y1:12,x2:9,y2:12})),
+      plus:    () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-5 h-5'},h('line',{x1:12,y1:5,x2:12,y2:19}),h('line',{x1:5,y1:12,x2:19,y2:12})),
+      up:      () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('line',{x1:12,y1:19,x2:12,y2:5}),h('polyline',{points:'5 12 12 5 19 12'})),
+      down:    () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('line',{x1:12,y1:5,x2:12,y2:19}),h('polyline',{points:'19 12 12 19 5 12'})),
+      copy:    () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('rect',{x:9,y:9,width:13,height:13,rx:2}),h('path',{d:'M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1'})),
+      check:   () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('polyline',{points:'20 6 9 17 4 12'})),
+      x:       () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('line',{x1:18,y1:6,x2:6,y2:18}),h('line',{x1:6,y1:6,x2:18,y2:18})),
+      chevron: () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('polyline',{points:'9 18 15 12 9 6'})),
+      refresh: () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('polyline',{points:'23 4 23 10 17 10'}),h('path',{d:'M20.49 15a9 9 0 11-2.12-9.36L23 10'})),
+      eye:     () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('path',{d:'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z'}),h('circle',{cx:12,cy:12,r:3})),
+      eyeOff:  () => h('svg',{viewBox:'0 0 24 24',fill:'none',stroke:'currentColor',strokeWidth:2,className:'w-4 h-4'},h('path',{d:'M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24'}),h('line',{x1:1,y1:1,x2:23,y2:23})),
+    };
+
+    // ─── UI Primitives ──────────────────────────────────────────────────────────
+    function Spinner({ size = 'md' }) {
+      const s = { sm: 'w-4 h-4', md: 'w-6 h-6', lg: 'w-10 h-10' }[size];
+      return h('div', { className: `${s} border-2 border-teal-500/30 border-t-teal-500 rounded-full animate-spin` });
+    }
+
+    function Toast({ message, type, onClose }) {
+      useEffect(() => { const t = setTimeout(onClose, 3500); return () => clearTimeout(t); }, []);
+      const bg = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-blue-600' }[type];
+      return h('div', { className: `flex items-center gap-3 px-4 py-3 rounded-xl text-white text-sm font-medium shadow-2xl ${bg} animate-slide-in` },
+        type === 'success' ? h(Ico.check) : h(Ico.x),
+        message
+      );
+    }
+
+    function useToast() {
+      const [toasts, setToasts] = useState([]);
+      const show = (msg, type = 'info') => setToasts(t => [...t, { id: Date.now(), message: msg, type }]);
+      const remove = (id) => setToasts(t => t.filter(x => x.id !== id));
+      const Toasts = () => h('div', { className: 'fixed top-4 right-4 z-50 flex flex-col gap-2 pointer-events-none' },
+        toasts.map(t => h(Toast, { key: t.id, ...t, onClose: () => remove(t.id) }))
+      );
+      return { show, Toasts };
+    }
+
+    function Btn({ children, onClick, variant = 'primary', size = 'md', loading, disabled, className = '', type = 'button' }) {
+      const v = {
+        primary: 'bg-teal-500 hover:bg-teal-400 text-gray-950 font-semibold',
+        secondary: 'bg-gray-800 hover:bg-gray-700 text-white border border-gray-700',
+        danger: 'bg-red-500/15 hover:bg-red-500/25 text-red-400 border border-red-500/25',
+        ghost: 'hover:bg-gray-800 text-gray-400 hover:text-white',
+      }[variant];
+      const s = { sm: 'px-3 py-1.5 text-xs', md: 'px-4 py-2.5 text-sm', lg: 'px-6 py-3 text-base' }[size];
+      return h('button', {
+        type, onClick,
+        disabled: disabled || loading,
+        className: `inline-flex items-center justify-center gap-2 rounded-xl transition-all duration-150 ${v} ${s} ${disabled || loading ? 'opacity-50 cursor-not-allowed' : ''} ${className}`
+      },
+        loading && h(Spinner, { size: 'sm' }),
+        children
+      );
+    }
+
+    function Inp({ label, error, type = 'text', ...props }) {
+      const [show, setShow] = useState(false);
+      const isPwd = type === 'password';
+      return h('div', { className: 'flex flex-col gap-1.5' },
+        label && h('label', { className: 'text-sm font-medium text-gray-300' }, label),
+        h('div', { className: 'relative' },
+          h('input', {
+            type: isPwd ? (show ? 'text' : 'password') : type,
+            className: `w-full bg-gray-800 border ${error ? 'border-red-500' : 'border-gray-700'} rounded-xl px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-teal-500 transition-colors text-sm`,
+            ...props
+          }),
+          isPwd && h('button', {
+            type: 'button',
+            onClick: () => setShow(!show),
+            className: 'absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-200'
+          }, show ? h(Ico.eyeOff) : h(Ico.eye))
+        ),
+        error && h('p', { className: 'text-xs text-red-400' }, error)
+      );
+    }
+
+    function Card({ children, className = '', onClick }) {
+      return h('div', {
+        onClick,
+        className: `bg-gray-900 border border-gray-800 rounded-2xl p-5 ${onClick ? 'cursor-pointer hover:border-gray-700 transition-colors' : ''} ${className}`
+      }, children);
+    }
+
+    function Badge({ children, variant = 'default' }) {
+      const v = {
+        default: 'bg-gray-800 text-gray-400',
+        success: 'bg-emerald-500/15 text-emerald-400',
+        error: 'bg-red-500/15 text-red-400',
+        warning: 'bg-yellow-500/15 text-yellow-400',
+        info: 'bg-blue-500/15 text-blue-400',
+      }[variant];
+      return h('span', { className: `inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${v}` }, children);
+    }
+
+    function Modal({ title, onClose, children }) {
+      return h('div', { className: 'fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-end sm:items-center justify-center p-4' },
+        h('div', { className: 'bg-gray-900 border border-gray-800 rounded-2xl w-full max-w-md animate-fade-in' },
+          h('div', { className: 'flex items-center justify-between p-5 border-b border-gray-800' },
+            h('h3', { className: 'text-white font-semibold' }, title),
+            h('button', { onClick: onClose, className: 'text-gray-400 hover:text-white transition-colors' }, h(Ico.x))
+          ),
+          h('div', { className: 'p-5' }, children)
+        )
+      );
+    }
+
+    // ─── Layout ─────────────────────────────────────────────────────────────────
+    function Layout({ children, page, setPage }) {
+      const { user, logout } = useAuth();
+
+      const nav = [
+        { id: 'dashboard', label: 'Dashboard', icon: Ico.home },
+        { id: 'wallets', label: 'Wallets', icon: Ico.wallet },
+        { id: 'send', label: 'Send', icon: Ico.send },
+        { id: 'transactions', label: 'Transactions', icon: Ico.history },
+        ...(user?.role === 'ADMIN' ? [{ id: 'admin', label: 'Admin', icon: Ico.admin }] : []),
+      ];
+
+      return h('div', { className: 'min-h-screen bg-gray-950 flex' },
+
+        // Sidebar desktop
+        h('aside', { className: 'hidden lg:flex flex-col w-64 bg-gray-900 border-r border-gray-800 p-6 fixed inset-y-0 z-10' },
+          h('div', { className: 'flex items-center gap-3 mb-10' },
+            h('div', { className: 'w-9 h-9 bg-teal-500 rounded-xl flex items-center justify-center' },
+              h('span', { className: 'text-gray-950 font-black text-lg' }, 'S')
+            ),
+            h('span', { className: 'text-white font-bold text-xl' }, 'SmartPay')
+          ),
+          h('nav', { className: 'flex flex-col gap-1 flex-1' },
+            nav.map(item => h('button', {
+              key: item.id,
+              onClick: () => setPage(item.id),
+              className: `flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${page === item.id ? 'bg-teal-500/15 text-teal-400 border border-teal-500/20' : 'text-gray-400 hover:text-white hover:bg-gray-800'}`
+            }, h(item.icon), item.label))
+          ),
+          h('div', { className: 'border-t border-gray-800 pt-4 mt-4' },
+            h('div', { className: 'flex items-center gap-3 px-4 py-3 mb-1' },
+              h('div', { className: 'w-8 h-8 bg-teal-500/20 rounded-full flex items-center justify-center flex-shrink-0' },
+                h('span', { className: 'text-teal-400 text-sm font-bold' }, user?.email?.[0]?.toUpperCase())
+              ),
+              h('div', { className: 'flex-1 min-w-0' },
+                h('p', { className: 'text-white text-sm font-medium truncate' }, user?.email),
+                h('p', { className: 'text-gray-500 text-xs' }, user?.role?.toLowerCase())
+              )
+            ),
+            h('button', {
+              onClick: logout,
+              className: 'flex items-center gap-3 px-4 py-3 rounded-xl text-sm text-gray-400 hover:text-red-400 hover:bg-red-500/10 w-full transition-all'
+            }, h(Ico.logout), 'Sign out')
+          )
+        ),
+
+        // Main
+        h('main', { className: 'flex-1 lg:ml-64 flex flex-col' },
+          // Mobile header
+          h('header', { className: 'lg:hidden flex items-center justify-between px-5 py-4 bg-gray-900 border-b border-gray-800 sticky top-0 z-10' },
+            h('div', { className: 'flex items-center gap-2' },
+              h('div', { className: 'w-7 h-7 bg-teal-500 rounded-lg flex items-center justify-center' },
+                h('span', { className: 'text-gray-950 font-black text-sm' }, 'S')
+              ),
+              h('span', { className: 'text-white font-bold' }, 'SmartPay')
+            ),
+            h('div', { className: 'w-8 h-8 bg-teal-500/20 rounded-full flex items-center justify-center' },
+              h('span', { className: 'text-teal-400 text-sm font-bold' }, user?.email?.[0]?.toUpperCase())
+            )
+          ),
+
+          h('div', { className: 'flex-1 p-5 lg:p-8 pb-24 lg:pb-8' }, children),
+
+          // Mobile bottom nav
+          h('nav', { className: 'lg:hidden fixed bottom-0 left-0 right-0 bg-gray-900 border-t border-gray-800 flex items-center justify-around px-2 py-2 z-10' },
+            nav.map(item => h('button', {
+              key: item.id,
+              onClick: () => setPage(item.id),
+              className: `flex flex-col items-center gap-1 px-3 py-2 rounded-xl transition-all ${page === item.id ? 'text-teal-400' : 'text-gray-500'}`
+            },
+              h(item.icon),
+              h('span', { className: 'text-[10px] font-medium' }, item.label.split(' ')[0])
+            ))
+          )
+        )
+      );
+    }
+
+    // ─── Landing ────────────────────────────────────────────────────────────────
+    function Landing({ setPage }) {
+      return h('div', { className: 'min-h-screen bg-gray-950 flex flex-col' },
+        h('header', { className: 'flex items-center justify-between px-6 lg:px-12 py-5 border-b border-gray-900' },
+          h('div', { className: 'flex items-center gap-3' },
+            h('div', { className: 'w-9 h-9 bg-teal-500 rounded-xl flex items-center justify-center' },
+              h('span', { className: 'text-gray-950 font-black text-lg' }, 'S')
+            ),
+            h('span', { className: 'text-white font-bold text-xl' }, 'SmartPay')
+          ),
+          h('div', { className: 'flex items-center gap-3' },
+            h(Btn, { variant: 'ghost', onClick: () => setPage('login') }, 'Sign in'),
+            h(Btn, { onClick: () => setPage('register') }, 'Get started')
+          )
+        ),
+
+        h('section', { className: 'flex-1 flex flex-col items-center justify-center px-6 py-20 text-center' },
+          h('div', { className: 'inline-flex items-center gap-2 bg-teal-500/10 border border-teal-500/20 rounded-full px-4 py-2 text-teal-400 text-sm font-medium mb-8' },
+            h(Ico.admin), 'AI-powered fraud detection'
+          ),
+          h('h1', { className: 'text-5xl lg:text-7xl font-black text-white tracking-tight leading-none mb-6' },
+            'Money moves', h('span', { className: 'block text-teal-500' }, 'at your speed')
+          ),
+          h('p', { className: 'text-gray-400 text-lg max-w-lg mb-10 leading-relaxed' },
+            'Send and receive money instantly. Protected by real-time fraud detection and enterprise-grade security.'
+          ),
+          h('div', { className: 'flex flex-col sm:flex-row gap-4 mb-20' },
+            h(Btn, { size: 'lg', onClick: () => setPage('register') }, 'Create free account', h(Ico.chevron)),
+            h(Btn, { size: 'lg', variant: 'secondary', onClick: () => setPage('login') }, 'Sign in')
+          ),
+          h('div', { className: 'grid grid-cols-3 gap-8 pt-10 border-t border-gray-900 w-full max-w-md' },
+            [['₹0', 'Transaction fees'], ['256-bit', 'Encryption'], ['Real-time', 'Fraud monitoring']].map(([v, l]) =>
+              h('div', { key: l, className: 'flex flex-col items-center gap-1' },
+                h('span', { className: 'text-2xl font-black text-white' }, v),
+                h('span', { className: 'text-gray-500 text-xs' }, l)
+              )
+            )
+          )
+        ),
+
+        h('section', { className: 'px-6 lg:px-12 pb-20' },
+          h('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-5 max-w-5xl mx-auto' },
+            [
+              { icon: Ico.send, title: 'Instant transfers', desc: 'Send money to any wallet ID. No delays, no intermediaries.' },
+              { icon: Ico.admin, title: 'AI fraud shield', desc: 'Every transaction is analyzed by our AI-powered fraud engine.' },
+              { icon: Ico.wallet, title: 'Multi-currency', desc: 'Hold INR, USD, EUR and more in separate wallets.' },
+            ].map(f => h(Card, { key: f.title, className: 'text-center' },
+              h('div', { className: 'w-12 h-12 bg-teal-500/10 rounded-2xl flex items-center justify-center mx-auto mb-4 text-teal-400' }, h(f.icon)),
+              h('h3', { className: 'text-white font-semibold mb-2' }, f.title),
+              h('p', { className: 'text-gray-500 text-sm' }, f.desc)
+            ))
+          )
+        )
+      );
+    }
+
+    // ─── Auth ────────────────────────────────────────────────────────────────────
+    function AuthPage({ type, setPage }) {
+      const { login } = useAuth();
+      const { show, Toasts } = useToast();
+      const [form, setForm] = useState({ email: '', password: '', fullName: '' });
+      const [errors, setErrors] = useState({});
+      const [loading, setLoading] = useState(false);
+
+      const validate = () => {
+        const e = {};
+        if (!form.email) e.email = 'Email is required';
+        else if (!/\S+@\S+\.\S+/.test(form.email)) e.email = 'Enter a valid email';
+        if (!form.password) e.password = 'Password is required';
+        else if (form.password.length < 8) e.password = 'At least 8 characters';
+        if (type === 'register' && !form.fullName) e.fullName = 'Name is required';
+        setErrors(e);
+        return !Object.keys(e).length;
+      };
+
+      const submit = async (ev) => {
+        ev.preventDefault();
+        if (!validate()) return;
+        setLoading(true);
+        try {
+          const body = type === 'login'
+            ? { email: form.email, password: form.password }
+            : { email: form.email, password: form.password, fullName: form.fullName };
+          const data = await api(`/api/auth/${type}`, { method: 'POST', body: JSON.stringify(body) });
+          login(data);
+        } catch (err) { show(err.message, 'error'); }
+        finally { setLoading(false); }
+      };
+
+      return h('div', { className: 'min-h-screen bg-gray-950 flex items-center justify-center p-5' },
+        h(Toasts),
+        h('div', { className: 'w-full max-w-md' },
+          h('div', { className: 'flex items-center gap-3 mb-10 justify-center' },
+            h('div', { className: 'w-10 h-10 bg-teal-500 rounded-xl flex items-center justify-center' },
+              h('span', { className: 'text-gray-950 font-black text-xl' }, 'S')
+            ),
+            h('span', { className: 'text-white font-bold text-2xl' }, 'SmartPay')
+          ),
+          h(Card, {},
+            h('h1', { className: 'text-2xl font-bold text-white mb-1' }, type === 'login' ? 'Welcome back' : 'Create account'),
+            h('p', { className: 'text-gray-500 text-sm mb-6' }, type === 'login' ? 'Sign in to your account' : 'Start sending money today'),
+            h('form', { onSubmit: submit, className: 'flex flex-col gap-4' },
+              type === 'register' && h(Inp, { label: 'Full name', placeholder: 'Your name', value: form.fullName, onChange: e => setForm({ ...form, fullName: e.target.value }), error: errors.fullName }),
+              h(Inp, { label: 'Email', type: 'email', placeholder: 'you@example.com', value: form.email, onChange: e => setForm({ ...form, email: e.target.value }), error: errors.email }),
+              h(Inp, { label: 'Password', type: 'password', placeholder: 'Min. 8 characters', value: form.password, onChange: e => setForm({ ...form, password: e.target.value }), error: errors.password }),
+              h(Btn, { type: 'submit', size: 'lg', loading, className: 'w-full mt-2' }, type === 'login' ? 'Sign in' : 'Create account')
+            ),
+            h('p', { className: 'text-center text-gray-500 text-sm mt-5' },
+              type === 'login' ? "Don't have an account? " : 'Already have an account? ',
+              h('button', { onClick: () => setPage(type === 'login' ? 'register' : 'login'), className: 'text-teal-400 hover:text-teal-300 font-medium' },
+                type === 'login' ? 'Sign up' : 'Sign in'
+              )
+            )
+          ),
+          h('button', { onClick: () => setPage('landing'), className: 'w-full text-center text-gray-600 text-sm mt-4 hover:text-gray-400' }, '← Back to home')
+        )
+      );
+    }
+
+    // ─── Dashboard ───────────────────────────────────────────────────────────────
+    function Dashboard({ setPage }) {
+      const { user } = useAuth();
+      const { show, Toasts } = useToast();
+      const [wallets, setWallets] = useState([]);
+      const [payments, setPayments] = useState([]);
+      const [loading, setLoading] = useState(true);
+
+      const load = () => {
+        setLoading(true);
+        Promise.all([api('/api/wallets', {}, user.token), api('/api/payments', {}, user.token)])
+          .then(([w, p]) => { setWallets(w || []); setPayments((p || []).slice(0, 5)); })
+          .catch(e => show(e.message, 'error'))
+          .finally(() => setLoading(false));
+      };
+
+      useEffect(load, []);
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64' }, h(Spinner, { size: 'lg' }));
+
+      const total = wallets.reduce((s, w) => s + parseFloat(w.balance || 0), 0);
+      const myIds = wallets.map(w => w.id);
+
+      return h('div', { className: 'max-w-4xl mx-auto' },
+        h(Toasts),
+        h('div', { className: 'flex items-center justify-between mb-8' },
+          h('div', {},
+            h('p', { className: 'text-gray-500 text-sm' }, greeting()),
+            h('h1', { className: 'text-2xl font-bold text-white' }, user.email?.split('@')[0])
+          ),
+          h(Btn, { variant: 'ghost', size: 'sm', onClick: load }, h(Ico.refresh))
+        ),
+
+        // Balance card
+        h('div', { className: 'bg-gradient-to-br from-teal-500/20 via-gray-900 to-gray-900 border border-teal-500/20 rounded-2xl p-7 mb-6' },
+          h('p', { className: 'text-gray-400 text-sm mb-2' }, 'Total balance'),
+          h('div', { className: 'flex items-end gap-3 mb-6' },
+            h('span', { className: 'text-5xl font-black text-white', style: { fontFamily: 'JetBrains Mono, monospace' } }, fmt(total)),
+            h(Badge, { variant: 'success' }, 'Live')
+          ),
+          h('div', { className: 'flex gap-3' },
+            h(Btn, { onClick: () => setPage('send') }, h(Ico.send), 'Send money'),
+            h(Btn, { variant: 'secondary', onClick: () => setPage('wallets') }, h(Ico.plus), 'Add funds')
+          )
+        ),
+
+        // Wallets grid
+        h('div', { className: 'grid grid-cols-1 sm:grid-cols-2 gap-4 mb-8' },
+          wallets.map(w => h(Card, { key: w.id, onClick: () => setPage('wallets') },
+            h('div', { className: 'flex items-center justify-between mb-3' },
+              h('div', { className: 'flex items-center gap-2' },
+                h('div', { className: 'w-8 h-8 bg-teal-500/15 rounded-lg flex items-center justify-center' },
+                  h('span', { className: 'text-teal-400 text-xs font-bold' }, w.currency)
+                ),
+                h('span', { className: 'text-gray-400 text-sm' }, `${w.currency} Wallet`)
+              ),
+              h(Ico.chevron)
+            ),
+            h('p', { className: 'text-2xl font-bold text-white', style: { fontFamily: 'JetBrains Mono, monospace' } }, fmt(w.balance, w.currency))
+          )),
+          h(Card, { onClick: () => setPage('wallets'), className: 'border-dashed flex items-center justify-center gap-2 text-gray-600 hover:text-teal-400 hover:border-teal-500/30 transition-colors min-h-[100px]' },
+            h(Ico.plus), h('span', { className: 'text-sm font-medium' }, 'New wallet')
+          )
+        ),
+
+        // Recent transactions
+        h('div', {},
+          h('div', { className: 'flex items-center justify-between mb-4' },
+            h('h2', { className: 'text-white font-semibold' }, 'Recent transactions'),
+            h('button', { onClick: () => setPage('transactions'), className: 'text-teal-400 text-sm hover:text-teal-300' }, 'View all')
+          ),
+          payments.length === 0
+            ? h(Card, { className: 'text-center py-12' },
+                h('p', { className: 'text-gray-500 text-sm mb-4' }, 'No transactions yet'),
+                h(Btn, { size: 'sm', onClick: () => setPage('send') }, 'Make your first payment')
+              )
+            : h('div', { className: 'flex flex-col gap-2' },
+                payments.map(p => {
+                  const sent = myIds.includes(p.senderWalletId);
+                  return h(Card, { key: p.id, className: 'flex items-center gap-4' },
+                    h('div', { className: `w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${sent ? 'bg-red-500/15 text-red-400' : 'bg-teal-500/15 text-teal-400'}` },
+                      sent ? h(Ico.up) : h(Ico.down)
+                    ),
+                    h('div', { className: 'flex-1 min-w-0' },
+                      h('p', { className: 'text-white text-sm font-medium' }, sent ? 'Sent' : 'Received'),
+                      h('p', { className: 'text-gray-500 text-xs' }, fmtDate(p.createdAt))
+                    ),
+                    h('div', { className: 'text-right' },
+                      h('p', { className: `font-bold text-sm ${sent ? 'text-red-400' : 'text-teal-400'}`, style: { fontFamily: 'JetBrains Mono, monospace' } },
+                        `${sent ? '-' : '+'}${fmt(p.amount, p.currency)}`
+                      ),
+                      h(Badge, { variant: p.status === 'SUCCESS' ? 'success' : p.status === 'FAILED' ? 'error' : 'warning' }, p.status)
+                    )
+                  );
+                })
+              )
+        )
+      );
+    }
+
+    // ─── Wallets ─────────────────────────────────────────────────────────────────
+    function Wallets() {
+      const { user } = useAuth();
+      const { show, Toasts } = useToast();
+      const [wallets, setWallets] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [depositWallet, setDepositWallet] = useState(null);
+      const [showNew, setShowNew] = useState(false);
+      const [depositAmt, setDepositAmt] = useState('');
+      const [newCur, setNewCur] = useState('USD');
+      const [busy, setBusy] = useState(false);
+      const [copied, setCopied] = useState(null);
+
+      const load = () => {
+        setLoading(true);
+        api('/api/wallets', {}, user.token).then(d => setWallets(d || [])).catch(e => show(e.message, 'error')).finally(() => setLoading(false));
+      };
+      useEffect(load, []);
+
+      const doDeposit = async () => {
+        if (!depositAmt || parseFloat(depositAmt) <= 0) { show('Enter a valid amount', 'error'); return; }
+        setBusy(true);
+        try {
+          await api(`/api/wallets/${depositWallet.id}/deposit`, { method: 'POST', body: JSON.stringify({ amount: parseFloat(depositAmt) }) }, user.token);
+          show('Funds added!', 'success'); setDepositWallet(null); setDepositAmt(''); load();
+        } catch (e) { show(e.message, 'error'); } finally { setBusy(false); }
+      };
+
+      const doCreate = async () => {
+        setBusy(true);
+        try {
+          await api('/api/wallets', { method: 'POST', body: JSON.stringify({ currency: newCur }) }, user.token);
+          show(`${newCur} wallet created!`, 'success'); setShowNew(false); load();
+        } catch (e) { show(e.message, 'error'); } finally { setBusy(false); }
+      };
+
+      const copyId = (id) => {
+        navigator.clipboard.writeText(id).catch(() => {});
+        setCopied(id); setTimeout(() => setCopied(null), 2000);
+      };
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64' }, h(Spinner, { size: 'lg' }));
+
+      return h('div', { className: 'max-w-3xl mx-auto' },
+        h(Toasts),
+        h('div', { className: 'flex items-center justify-between mb-8' },
+          h('h1', { className: 'text-2xl font-bold text-white' }, 'My Wallets'),
+          h(Btn, { onClick: () => setShowNew(true) }, h(Ico.plus), 'New wallet')
+        ),
+        h('div', { className: 'flex flex-col gap-4' },
+          wallets.map(w => h(Card, { key: w.id },
+            h('div', { className: 'flex items-start justify-between mb-5' },
+              h('div', { className: 'flex items-center gap-3' },
+                h('div', { className: 'w-12 h-12 bg-teal-500/15 rounded-2xl flex items-center justify-center' },
+                  h('span', { className: 'text-teal-400 font-bold' }, w.currency)
+                ),
+                h('div', {},
+                  h('p', { className: 'text-white font-semibold' }, `${w.currency} Wallet`),
+                  h('div', { className: 'flex items-center gap-1 mt-0.5' },
+                    h('p', { className: 'text-gray-500 text-xs font-mono' }, short(w.id)),
+                    h('button', { onClick: () => copyId(w.id), className: 'text-gray-600 hover:text-teal-400 transition-colors' },
+                      copied === w.id ? h(Ico.check) : h(Ico.copy)
+                    )
+                  )
+                )
+              ),
+              h(Badge, { variant: 'success' }, 'Active')
+            ),
+            h('div', { className: 'flex items-end justify-between' },
+              h('div', {},
+                h('p', { className: 'text-gray-500 text-xs mb-1' }, 'Balance'),
+                h('p', { className: 'text-4xl font-black text-white', style: { fontFamily: 'JetBrains Mono, monospace' } }, fmt(w.balance, w.currency))
+              ),
+              h(Btn, { onClick: () => setDepositWallet(w) }, h(Ico.plus), 'Add funds')
+            )
+          ))
+        ),
+
+        depositWallet && h(Modal, { title: 'Add funds', onClose: () => setDepositWallet(null) },
+          h('p', { className: 'text-gray-400 text-sm mb-5' }, `Adding to your `, h('strong', { className: 'text-white' }, depositWallet.currency), ' wallet'),
+          h(Inp, { label: 'Amount', type: 'number', placeholder: '0.00', value: depositAmt, onChange: e => setDepositAmt(e.target.value) }),
+          h('div', { className: 'flex gap-3 mt-5' },
+            h(Btn, { variant: 'secondary', onClick: () => setDepositWallet(null), className: 'flex-1' }, 'Cancel'),
+            h(Btn, { onClick: doDeposit, loading: busy, className: 'flex-1' }, 'Add funds')
+          )
+        ),
+
+        showNew && h(Modal, { title: 'Create wallet', onClose: () => setShowNew(false) },
+          h('p', { className: 'text-gray-400 text-sm mb-5' }, 'Select currency'),
+          h('div', { className: 'grid grid-cols-3 gap-3 mb-5' },
+            ['USD', 'EUR', 'GBP', 'AED', 'SGD', 'JPY'].map(c =>
+              h('button', {
+                key: c, onClick: () => setNewCur(c),
+                className: `py-3 rounded-xl text-sm font-semibold border transition-all ${newCur === c ? 'bg-teal-500/20 border-teal-500/50 text-teal-400' : 'border-gray-700 text-gray-400 hover:border-gray-600'}`
+              }, c)
+            )
+          ),
+          h('div', { className: 'flex gap-3' },
+            h(Btn, { variant: 'secondary', onClick: () => setShowNew(false), className: 'flex-1' }, 'Cancel'),
+            h(Btn, { onClick: doCreate, loading: busy, className: 'flex-1' }, `Create ${newCur} wallet`)
+          )
+        )
+      );
+    }
+
+    // ─── Send ─────────────────────────────────────────────────────────────────────
+    function Send() {
+      const { user } = useAuth();
+      const { show, Toasts } = useToast();
+      const [wallets, setWallets] = useState([]);
+      const [form, setForm] = useState({ senderWalletId: '', receiverWalletId: '', amount: '' });
+      const [loading, setLoading] = useState(false);
+      const [pageLoad, setPageLoad] = useState(true);
+      const [success, setSuccess] = useState(null);
+
+      useEffect(() => {
+        api('/api/wallets', {}, user.token).then(d => {
+          setWallets(d || []);
+          if (d?.[0]) setForm(f => ({ ...f, senderWalletId: d[0].id }));
+        }).catch(e => show(e.message, 'error')).finally(() => setPageLoad(false));
+      }, []);
+
+      const send = async (ev) => {
+        ev.preventDefault();
+        if (!form.senderWalletId || !form.receiverWalletId || !form.amount) { show('Fill all fields', 'error'); return; }
+        if (parseFloat(form.amount) <= 0) { show('Enter valid amount', 'error'); return; }
+        setLoading(true);
+        try {
+          const key = `pay-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          const data = await api('/api/payments', {
+            method: 'POST',
+            body: JSON.stringify({ senderWalletId: form.senderWalletId, receiverWalletId: form.receiverWalletId, amount: parseFloat(form.amount) }),
+            idempotencyKey: key,
+          }, user.token);
+          setSuccess(data);
+        } catch (e) { show(e.message, 'error'); } finally { setLoading(false); }
+      };
+
+      if (pageLoad) return h('div', { className: 'flex items-center justify-center h-64' }, h(Spinner, { size: 'lg' }));
+
+      if (success) return h('div', { className: 'max-w-md mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center' },
+        h(Toasts),
+        h('div', { className: 'w-20 h-20 bg-teal-500/20 rounded-full flex items-center justify-center mb-6 text-teal-400' }, h(Ico.check)),
+        h('h2', { className: 'text-2xl font-bold text-white mb-2' }, 'Payment sent!'),
+        h('p', { className: 'text-gray-400 text-sm mb-2' }, `${fmt(success.amount, success.currency)} transferred`),
+        h(Badge, { variant: 'success', className: 'mb-8' }, success.status),
+        h(Card, { className: 'w-full text-left mb-6' },
+          [['Payment ID', short(success.id)], ['Amount', fmt(success.amount, success.currency)], ['Status', success.status], ['Date', fmtDate(success.createdAt)]].map(([l, v]) =>
+            h('div', { key: l, className: 'flex justify-between py-2.5 border-b border-gray-800 last:border-0' },
+              h('span', { className: 'text-gray-500 text-sm' }, l),
+              h('span', { className: 'text-white text-sm font-medium' }, v)
+            )
+          )
+        ),
+        h(Btn, { onClick: () => { setSuccess(null); setForm({ ...form, receiverWalletId: '', amount: '' }); } }, 'Send another')
+      );
+
+      const sender = wallets.find(w => w.id === form.senderWalletId);
+
+      return h('div', { className: 'max-w-lg mx-auto' },
+        h(Toasts),
+        h('h1', { className: 'text-2xl font-bold text-white mb-8' }, 'Send Money'),
+        h('form', { onSubmit: send, className: 'flex flex-col gap-5' },
+          h('div', {},
+            h('label', { className: 'text-sm font-medium text-gray-300 block mb-1.5' }, 'From wallet'),
+            h('select', {
+              value: form.senderWalletId,
+              onChange: e => setForm({ ...form, senderWalletId: e.target.value }),
+              className: 'w-full bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white text-sm focus:outline-none focus:border-teal-500'
+            },
+              wallets.map(w => h('option', { key: w.id, value: w.id }, `${w.currency} Wallet — ${fmt(w.balance, w.currency)}`))
+            )
+          ),
+          h(Inp, { label: 'Recipient wallet ID', placeholder: 'Paste the wallet ID here', value: form.receiverWalletId, onChange: e => setForm({ ...form, receiverWalletId: e.target.value }) }),
+          h(Inp, { label: 'Amount', type: 'number', placeholder: '0.00', value: form.amount, onChange: e => setForm({ ...form, amount: e.target.value }) }),
+          sender && h('div', { className: 'bg-gray-800/50 rounded-xl p-4 flex items-center justify-between' },
+            h('span', { className: 'text-gray-400 text-sm' }, 'Available balance'),
+            h('span', { className: 'text-white font-semibold text-sm', style: { fontFamily: 'JetBrains Mono, monospace' } }, fmt(sender.balance, sender.currency))
+          ),
+          h(Btn, { type: 'submit', size: 'lg', loading, className: 'w-full mt-2' }, h(Ico.send), 'Send money')
+        ),
+        h('p', { className: 'text-center text-gray-600 text-xs mt-5' }, 'Protected by AI fraud detection')
+      );
+    }
+
+    // ─── Transactions ─────────────────────────────────────────────────────────────
+    function Transactions() {
+      const { user } = useAuth();
+      const { show, Toasts } = useToast();
+      const [payments, setPayments] = useState([]);
+      const [wallets, setWallets] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [filter, setFilter] = useState('all');
+
+      useEffect(() => {
+        Promise.all([api('/api/payments', {}, user.token), api('/api/wallets', {}, user.token)])
+          .then(([p, w]) => { setPayments(p || []); setWallets(w || []); })
+          .catch(e => show(e.message, 'error')).finally(() => setLoading(false));
+      }, []);
+
+      const myIds = wallets.map(w => w.id);
+      const filtered = payments.filter(p => {
+        if (filter === 'sent') return myIds.includes(p.senderWalletId);
+        if (filter === 'received') return myIds.includes(p.receiverWalletId) && !myIds.includes(p.senderWalletId);
+        return true;
+      });
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64' }, h(Spinner, { size: 'lg' }));
+
+      return h('div', { className: 'max-w-3xl mx-auto' },
+        h(Toasts),
+        h('h1', { className: 'text-2xl font-bold text-white mb-6' }, 'Transactions'),
+        h('div', { className: 'flex gap-2 mb-6 bg-gray-800 p-1 rounded-xl w-fit' },
+          ['all', 'sent', 'received'].map(f =>
+            h('button', {
+              key: f, onClick: () => setFilter(f),
+              className: `px-4 py-2 rounded-lg text-sm font-medium capitalize transition-all ${filter === f ? 'bg-teal-500/20 text-teal-400' : 'text-gray-400 hover:text-white'}`
+            }, f)
+          )
+        ),
+        filtered.length === 0
+          ? h(Card, { className: 'text-center py-16' }, h('p', { className: 'text-gray-500' }, 'No transactions found'))
+          : h('div', { className: 'flex flex-col gap-3' },
+              filtered.map(p => {
+                const sent = myIds.includes(p.senderWalletId);
+                return h(Card, { key: p.id },
+                  h('div', { className: 'flex items-center gap-4' },
+                    h('div', { className: `w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0 ${sent ? 'bg-red-500/15 text-red-400' : 'bg-teal-500/15 text-teal-400'}` },
+                      sent ? h(Ico.up) : h(Ico.down)
+                    ),
+                    h('div', { className: 'flex-1 min-w-0' },
+                      h('div', { className: 'flex items-center gap-2 mb-0.5' },
+                        h('p', { className: 'text-white text-sm font-medium' }, sent ? 'Sent' : 'Received'),
+                        h(Badge, { variant: p.status === 'SUCCESS' ? 'success' : p.status === 'FAILED' ? 'error' : 'warning' }, p.status)
+                      ),
+                      h('p', { className: 'text-gray-500 text-xs' }, fmtDate(p.createdAt)),
+                      h('p', { className: 'text-gray-700 text-xs font-mono mt-0.5' }, short(p.id))
+                    ),
+                    h('p', { className: `font-bold flex-shrink-0 ${sent ? 'text-red-400' : 'text-teal-400'}`, style: { fontFamily: 'JetBrains Mono, monospace' } },
+                      `${sent ? '-' : '+'}${fmt(p.amount, p.currency)}`
+                    )
+                  )
+                );
+              })
+            )
+      );
+    }
+
+    // ─── Admin ────────────────────────────────────────────────────────────────────
+    function Admin() {
+      const { user } = useAuth();
+      const { show, Toasts } = useToast();
+      const [users, setUsers] = useState([]);
+      const [payments, setPayments] = useState([]);
+      const [tab, setTab] = useState('users');
+      const [loading, setLoading] = useState(true);
+      const [statusTarget, setStatusTarget] = useState(null);
+      const [newStatus, setNewStatus] = useState('');
+      const [busy, setBusy] = useState(false);
+
+      const load = () => {
+        setLoading(true);
+        Promise.all([api('/api/admin/users', {}, user.token), api('/api/admin/payments', {}, user.token)])
+          .then(([u, p]) => { setUsers(u || []); setPayments(p || []); })
+          .catch(e => show(e.message, 'error')).finally(() => setLoading(false));
+      };
+      useEffect(load, []);
+
+      const updateStatus = async () => {
+        if (!newStatus) return;
+        setBusy(true);
+        try {
+          await api(`/api/admin/users/${statusTarget.id}/status`, { method: 'PATCH', body: JSON.stringify({ status: newStatus }) }, user.token);
+          show('Status updated!', 'success'); setStatusTarget(null); setNewStatus(''); load();
+        } catch (e) { show(e.message, 'error'); } finally { setBusy(false); }
+      };
+
+      if (loading) return h('div', { className: 'flex items-center justify-center h-64' }, h(Spinner, { size: 'lg' }));
+
+      return h('div', { className: 'max-w-5xl mx-auto' },
+        h(Toasts),
+        h('div', { className: 'flex items-center justify-between mb-8' },
+          h('div', {},
+            h('h1', { className: 'text-2xl font-bold text-white' }, 'Admin Panel'),
+            h('p', { className: 'text-gray-500 text-sm' }, `${users.length} users · ${payments.length} payments`)
+          ),
+          h(Badge, { variant: 'warning' }, 'Admin')
+        ),
+        h('div', { className: 'flex gap-2 mb-6 bg-gray-800 p-1 rounded-xl w-fit' },
+          ['users', 'payments'].map(t =>
+            h('button', {
+              key: t, onClick: () => setTab(t),
+              className: `px-5 py-2 rounded-lg text-sm font-medium capitalize transition-all ${tab === t ? 'bg-teal-500/20 text-teal-400' : 'text-gray-400 hover:text-white'}`
+            }, t)
+          )
+        ),
+        tab === 'users' && h('div', { className: 'flex flex-col gap-3' },
+          users.map(u => h(Card, { key: u.id },
+            h('div', { className: 'flex items-center gap-4' },
+              h('div', { className: 'w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center flex-shrink-0' },
+                h('span', { className: 'text-gray-300 font-bold text-sm' }, u.email?.[0]?.toUpperCase())
+              ),
+              h('div', { className: 'flex-1 min-w-0' },
+                h('div', { className: 'flex items-center gap-2 mb-0.5' },
+                  h('p', { className: 'text-white text-sm font-medium truncate' }, u.email),
+                  u.role === 'ADMIN' && h(Badge, { variant: 'warning' }, 'Admin')
+                ),
+                h('p', { className: 'text-gray-500 text-xs' }, `${u.fullName} · ${fmtDate(u.createdAt)}`)
+              ),
+              h('div', { className: 'flex items-center gap-3 flex-shrink-0' },
+                h(Badge, { variant: u.status === 'ACTIVE' ? 'success' : u.status === 'FROZEN' ? 'info' : 'error' }, u.status),
+                u.role !== 'ADMIN' && h(Btn, { size: 'sm', variant: 'secondary', onClick: () => { setStatusTarget(u); setNewStatus(u.status); } }, 'Manage')
+              )
+            )
+          ))
+        ),
+        tab === 'payments' && h('div', { className: 'flex flex-col gap-3' },
+          payments.map(p => h(Card, { key: p.id },
+            h('div', { className: 'flex items-center gap-4' },
+              h('div', { className: 'w-10 h-10 bg-gray-800 rounded-xl flex items-center justify-center flex-shrink-0 text-gray-400' }, h(Ico.send)),
+              h('div', { className: 'flex-1 min-w-0' },
+                h('p', { className: 'text-white text-sm font-mono' }, short(p.id)),
+                h('p', { className: 'text-gray-500 text-xs' }, fmtDate(p.createdAt))
+              ),
+              h('div', { className: 'text-right flex-shrink-0' },
+                h('p', { className: 'text-white font-bold text-sm font-mono' }, fmt(p.amount, p.currency)),
+                h(Badge, { variant: p.status === 'SUCCESS' ? 'success' : p.status === 'FAILED' ? 'error' : 'warning' }, p.status)
+              )
+            )
+          ))
+        ),
+        statusTarget && h(Modal, { title: 'Update status', onClose: () => setStatusTarget(null) },
+          h('p', { className: 'text-gray-400 text-sm mb-5' }, 'Update status for ', h('strong', { className: 'text-white' }, statusTarget.email)),
+          h('div', { className: 'flex flex-col gap-2 mb-5' },
+            [['ACTIVE', 'bg-teal-500'], ['SUSPENDED', 'bg-yellow-500'], ['FROZEN', 'bg-blue-500']].map(([s, dot]) =>
+              h('button', {
+                key: s, onClick: () => setNewStatus(s),
+                className: `flex items-center gap-3 p-3 rounded-xl border transition-all ${newStatus === s ? 'border-teal-500/50 bg-teal-500/10' : 'border-gray-700 hover:border-gray-600'}`
+              },
+                h('div', { className: `w-3 h-3 rounded-full ${dot}` }),
+                h('span', { className: `text-sm font-medium ${newStatus === s ? 'text-white' : 'text-gray-400'}` }, s)
+              )
+            )
+          ),
+          h('div', { className: 'flex gap-3' },
+            h(Btn, { variant: 'secondary', onClick: () => setStatusTarget(null), className: 'flex-1' }, 'Cancel'),
+            h(Btn, { onClick: updateStatus, loading: busy, className: 'flex-1' }, 'Update')
+          )
+        )
+      );
+    }
+
+    // ─── App Root ─────────────────────────────────────────────────────────────────
+    function AppContent() {
+      const { user } = useAuth();
+      const [page, setPage] = useState('landing');
+
+      useEffect(() => {
+        if (user && ['landing', 'login', 'register'].includes(page)) setPage('dashboard');
+        if (!user && !['landing', 'login', 'register'].includes(page)) setPage('landing');
+      }, [user]);
+
+      if (!user) {
+        if (page === 'login') return h(AuthPage, { type: 'login', setPage });
+        if (page === 'register') return h(AuthPage, { type: 'register', setPage });
+        return h(Landing, { setPage });
+      }
+
+      const pages = {
+        dashboard: h(Dashboard, { setPage }),
+        wallets: h(Wallets),
+        send: h(Send),
+        transactions: h(Transactions),
+        admin: user.role === 'ADMIN' ? h(Admin) : h(Dashboard, { setPage }),
+      };
+
+      return h(Layout, { page, setPage }, pages[page] || h(Dashboard, { setPage }));
+    }
+
+    function App() {
+      return h(AuthProvider, {}, h(AppContent));
+    }
+
+    createRoot(document.getElementById('root')).render(h(App));
+</script>
+</body>
+</html>
